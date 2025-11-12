@@ -23,6 +23,72 @@ $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
 # Import PSADT module
 Import-Module "$ScriptRoot\PSAppDeployToolkit\PSAppDeployToolkit.psd1" -Force
 
+# Function to load configuration from config.json
+function Get-ConfigurationSettings {
+    [CmdletBinding()]
+    param(
+        [string]$ConfigPath = (Join-Path $ScriptRoot 'config.json')
+    )
+    
+    $defaultConfig = @{
+        SessionParameters = @{
+            PassThru         = $true
+            DeployMode       = 'Interactive'
+            AppVendor        = 'Ricoh'
+            AppName          = 'Application Upgrader'
+            AppScriptAuthor  = 'Tim Welch'
+            RequireAdmin     = $true
+        }
+        DetectionFile = 'C:\ProgramData\CompanyPortalTools\WingetUpgradeTool.installed'
+        AcceptableCodes = @(0, -1978335226, -1979189490)
+        SkipApplicationIds = @()
+        WingetArguments = @{
+            upgrade = '--silent --disable-interactivity --nowarn --accept-source-agreements --accept-package-agreements'
+        }
+        UI = @{
+            SelectionWindowTitle = 'Select applications to upgrade'
+            SelectionWindowWidth = 500
+            SelectionWindowHeight = 600
+        }
+    }
+    
+    # Try to load config.json if it exists
+    if (Test-Path $ConfigPath) {
+        try {
+            $jsonConfig = Get-Content -Path $ConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json
+            Write-ADTLogEntry -Message "Loaded configuration from $ConfigPath" -Severity 1
+            
+            # Merge JSON config with defaults (JSON values override defaults)
+            if ($jsonConfig.SessionParameters) {
+                foreach ($key in $jsonConfig.SessionParameters.PSObject.Properties.Name) {
+                    $defaultConfig.SessionParameters[$key] = $jsonConfig.SessionParameters.$key
+                }
+            }
+            if ($jsonConfig.DetectionFile) { $defaultConfig.DetectionFile = $jsonConfig.DetectionFile }
+            if ($jsonConfig.AcceptableCodes) { $defaultConfig.AcceptableCodes = $jsonConfig.AcceptableCodes }
+            if ($jsonConfig.SkipApplicationIds) { $defaultConfig.SkipApplicationIds = $jsonConfig.SkipApplicationIds }
+            if ($jsonConfig.WingetArguments) { $defaultConfig.WingetArguments = $jsonConfig.WingetArguments }
+            if ($jsonConfig.UI) {
+                foreach ($key in $jsonConfig.UI.PSObject.Properties.Name) {
+                    $defaultConfig.UI[$key] = $jsonConfig.UI.$key
+                }
+            }
+        }
+        catch {
+            Write-ADTLogEntry -Message "Failed to parse config.json, using defaults: $_" -Severity 2
+        }
+    }
+    else {
+        Write-ADTLogEntry -Message "Config file not found at $ConfigPath, using defaults" -Severity 2
+    }
+    
+    return $defaultConfig
+}
+
+$defaultConfig = Get-ConfigurationSettings
+$defaultConfig.WingetArguments
+Exit
+
 # Function to get the path to winget.exe
 function Get-WingetPath {
     $resolveWingetPath = Resolve-Path "C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_*_x64__8wekyb3d8bbwe\winget.exe" -ErrorAction SilentlyContinue
@@ -43,22 +109,18 @@ function Get-WingetPath {
     return $null
 }
 
+# Load configuration from config.json
+$Config = Get-ConfigurationSettings -ConfigPath (Join-Path $ScriptRoot 'config.json')
+
 # Open a toolkit session for logging, prompts, and progress bars
-$SessionParameters = @{
-    SessionState = $ExecutionContext.SessionState
-    PassThru      = $true
-    DeployMode  = "Interactive"
-    AppVendor  = "Ricoh"
-    AppName    = "Application Upgrader"
-    # AppVersion = "1.0.0" - Optionally specify an application version but this tends to overflow popups
-    AppScriptAuthor = "Tim Welch"
-    RequireAdmin = $true
-}
+# Prepare SessionParameters with required runtime values
+$SessionParameters = $Config.SessionParameters.Clone()
+$SessionParameters['SessionState'] = $ExecutionContext.SessionState
 $adtSession = Open-ADTSession @SessionParameters -ErrorAction Stop
 #endregion Initialization
 
 #region Detection File
-$DetectionFile = 'C:\ProgramData\CompanyPortalTools\WingetUpgradeTool.installed'
+$DetectionFile = $Config.DetectionFile
 #endregion Detection File
 
 #region Winget Upgrade Logic
@@ -68,6 +130,8 @@ Write-ADTLogEntry -Message '=== Starting Winget Upgrade Tool ===' -Severity 1
 if (-not (Get-Module -ListAvailable Microsoft.WinGet.Client)) {
     try {
         Write-ADTLogEntry -Message 'Installing Microsoft.WinGet.Client module...' -Severity 1
+        Find-PackageProvider -Name NuGet -ForceBootstrap
+        Set-PSRepository -Name "PSGallery" -InstallationPolicy Trusted
         Install-Module Microsoft.WinGet.Client -Scope AllUsers -Force -ErrorAction Stop
     }
     catch {
@@ -119,6 +183,12 @@ Get-WinGetPackage | Where-Object { $_.IsUpdateAvailable } | Select-Object Name,I
         $upgradeablePackages = ,$upgradeablePackages
     }
 
+    # Filter out skipped application IDs from config
+    if ($Config.SkipApplicationIds -and $Config.SkipApplicationIds.Count -gt 0) {
+        Write-ADTLogEntry -Message "Filtering out $($Config.SkipApplicationIds.Count) skipped application IDs" -Severity 1
+        $upgradeablePackages = $upgradeablePackages | Where-Object { $_.Id -notin $Config.SkipApplicationIds }
+    }
+
     if (-not $upgradeablePackages -or $upgradeablePackages.Count -eq 0) {
         Show-ADTInstallationPrompt -Message "No upgrades available via Winget." -ButtonRightText "Close"
         Write-ADTLogEntry -Message "No Winget upgrades found." -Severity 1
@@ -155,9 +225,9 @@ $null = [System.Windows.Controls.Grid]
 $null = [System.Windows.Controls.ColumnDefinition] 
 
 $window = New-Object Windows.Window 
-$window.Title = "Select applications to upgrade" 
-$window.Width = 500 
-$window.Height = 600 
+$window.Title = $Config.UI.SelectionWindowTitle
+$window.Width = $Config.UI.SelectionWindowWidth
+$window.Height = $Config.UI.SelectionWindowHeight 
 $window.WindowStartupLocation = 'CenterScreen' 
 
 $scrollViewer = New-Object Windows.Controls.ScrollViewer 
@@ -242,10 +312,10 @@ if ($window.ShowDialog()) {
 
             if ($app.Id) {
                 try {
-                    # Treat known false-negative Winget exit codes as success
-                    $acceptableCodes = @(0, -1978335226, 0x8A15010E)
+                    # Use acceptable exit codes from config
+                    $acceptableCodes = $Config.AcceptableCodes
 
-                    $Arguments = "upgrade --id `"$($app.Id)`" --silent --disable-interactivity --nowarn --accept-source-agreements --accept-package-agreements"
+                    $Arguments = "upgrade --id `"$($app.Id)`" $($Config.WingetArguments.upgrade)"
                     Write-ADTLogEntry -Message "Executing $winget with arguments: $($Arguments)" -Severity 1
 
                     # Use the PSAppDeployToolkit wrapper so ADT handles logging and environment correctly.

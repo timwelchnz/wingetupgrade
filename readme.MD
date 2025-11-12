@@ -1,4 +1,4 @@
-# wingetupgrade
+# Winget Application Upgrader
 
 Small helper repository to run Windows Package Manager (winget) upgrades via a simple PowerShell wrapper and the PSAppDeployToolkit.
 
@@ -10,8 +10,7 @@ This repository provides a script to automate checking for and applying upgrades
 
 - Windows 10 / Windows 11
 - PowerShell (built-in)
-- Windows Package Manager (`winget`) installed and available in PATH
-- Administrator privileges for system-wide upgrades (PSAppDeployToolkit will help request elevation)
+- Windows Package Manager (`winget`) installed 
 
 ## Usage (Intune Win32 app)
 

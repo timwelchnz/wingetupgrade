@@ -1,0 +1,24 @@
+{
+  "SessionParameters": {
+    "SessionState": null,
+    "PassThru": true,
+    "DeployMode": "Interactive",
+    "AppVendor": "Ricoh",
+    "AppName": "Application Upgrader",
+    "AppScriptAuthor": "Tim Welch",
+    "RequireAdmin": true
+  },
+  "DetectionFile": "C:\\ProgramData\\CompanyPortalTools\\WingetUpgradeTool.installed",
+  "AcceptableCodes": [0, -1978335226, -1979189490],
+  "SkipApplicationIds": ["Microsoft.Teams"],
+  "IntuneWinAppUtilPath": "",
+  "IntuneWinAppUtilDownloadUrl": "https://github.com/microsoft/Intune-Win32-App-Packaging-Tool/releases/latest/download/IntuneWinAppUtil.exe",
+  "WingetArguments": {
+    "upgrade": "--silent --disable-interactivity --nowarn --accept-source-agreements --accept-package-agreements"
+  },
+  "UI": {
+    "SelectionWindowTitle": "Select applications to upgrade",
+    "SelectionWindowWidth": 500,
+    "SelectionWindowHeight": 600
+  }
+}
