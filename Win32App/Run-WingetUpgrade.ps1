@@ -6,9 +6,10 @@
     Designed for deployment as a user-available Win32 app in Intune.
 
 .NOTES
-    Run in Intune with
-    ServiceUI.exe -process:explorer.exe %SYSTEMROOT%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "Run-WingetUpgrade.ps1"
-#>
+    Run in Intune with Install Command...
+    Troubleshooting: ServiceUI.exe -process:explorer.exe %SYSTEMROOT%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "Run-WingetUpgrade.ps1"
+    Production: ServiceUI.exe -process:explorer.exe %SYSTEMROOT%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "Run-WingetUpgrade.ps1"
+#>  
 
 #Requires -RunAsAdministrator
 
@@ -84,10 +85,6 @@ function Get-ConfigurationSettings {
     
     return $defaultConfig
 }
-
-$defaultConfig = Get-ConfigurationSettings
-$defaultConfig.WingetArguments
-Exit
 
 # Function to get the path to winget.exe
 function Get-WingetPath {
@@ -320,7 +317,8 @@ if ($window.ShowDialog()) {
 
                     # Use the PSAppDeployToolkit wrapper so ADT handles logging and environment correctly.
                     # Request a passthru object so we can inspect ExitCode.
-                    $ExecuteResult = Start-ADTProcess -FilePath $winget -ArgumentList $Arguments -PassThru -ErrorAction Stop
+                    # Use -CreateNoWindow to avoid flashing a console window but remove it for troubleshooting if needed
+                    $ExecuteResult = Start-ADTProcess -FilePath $winget -ArgumentList $Arguments -CreateNoWindow -PassThru -ErrorAction Stop
 
                     if ($acceptableCodes -contains $ExecuteResult.ExitCode) {
                         Write-ADTLogEntry -Message "$($app.Name) upgraded (ExitCode: $($ExecuteResult.ExitCode))." -Severity 1
@@ -359,6 +357,52 @@ catch {
     Write-Warning "Failed to create detection file: $_"
 }
 #endregion Detection File Creation
+
+#region Scheduled Task for Detection File Cleanup
+try {
+    # Create a scheduled task to delete the detection file after 5 minutes
+    Write-ADTLogEntry -Message "Creating scheduled task to delete detection file in 5 minutes" -Severity 1
+    
+    $taskName = "WingetUpgradeTool_DetectionFileCleanup"
+    $taskPath = "\WingetUpgradeTool\"
+    $taskDescription = "Automatically deletes the WingetUpgradeTool detection file 5 minutes after creation"
+    
+    # Remove existing task if it exists to avoid conflicts
+    if ((Get-ScheduledTask -TaskName $taskName -TaskPath $taskPath -ErrorAction SilentlyContinue)) {
+        Unregister-ScheduledTask -TaskName $taskName -TaskPath $taskPath -Confirm:$false -ErrorAction SilentlyContinue
+        Write-ADTLogEntry -Message "Removed existing scheduled task: $taskName" -Severity 1
+    }
+    
+    # Create the cleanup script content
+    $cleanupScript = @"
+`$DetectionFile = '$DetectionFile'
+if (Test-Path `$DetectionFile) {
+    Remove-Item -Path `$DetectionFile -Force -ErrorAction SilentlyContinue
+    Write-Host "Deleted detection file: `$DetectionFile"
+}
+"@
+    
+    # Create action to run PowerShell with the cleanup script
+    $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -Command `"$cleanupScript`""
+    
+    # Create trigger for 5 minutes from now
+    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(5)
+    
+    # Create task settings
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew
+    
+    # Register the scheduled task (runs as SYSTEM since this script runs as admin)
+    $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+    
+    Register-ScheduledTask -TaskName $taskName -TaskPath $taskPath -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description $taskDescription -Force
+    
+    Write-ADTLogEntry -Message "Successfully created scheduled task to delete detection file in 5 minutes" -Severity 1
+}
+catch {
+    Write-ADTLogEntry -Message "Failed to create scheduled task for detection file cleanup: $_" -Severity 2
+    # Don't throw - this is a non-critical operation
+}
+#endregion Scheduled Task for Detection File Cleanup
 
 
 # Close the toolkit session and exit cleanly

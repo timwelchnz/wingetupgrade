@@ -1,6 +1,8 @@
 <#
+.SYNOPSIS
+    Wraps the script package as a Win32 App for Intune deployment using the Microsoft Win32 Content Prep Tool.
+
 .NOTES
-    Ricoh
     Tim Welch
 
     Reference: https://github.com/microsoft/Microsoft-Win32-Content-Prep-Tool/

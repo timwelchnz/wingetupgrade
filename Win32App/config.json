@@ -10,7 +10,7 @@
   },
   "DetectionFile": "C:\\ProgramData\\CompanyPortalTools\\WingetUpgradeTool.installed",
   "AcceptableCodes": [0, -1978335226, -1979189490],
-  "SkipApplicationIds": ["Microsoft.Teams"],
+  "SkipApplicationIds": ["Microsoft.Teams","Microsoft.AppInstaller"],
   "IntuneWinAppUtilPath": "",
   "IntuneWinAppUtilDownloadUrl": "https://github.com/microsoft/Intune-Win32-App-Packaging-Tool/releases/latest/download/IntuneWinAppUtil.exe",
   "WingetArguments": {
